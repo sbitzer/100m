@@ -7,6 +7,8 @@ Created on Sat May  5 16:46:46 2018
 """
 
 import pystan
+import numpy as np
+import pandas as pd
 
 
 #%% definition of Stan model
@@ -52,7 +54,7 @@ transformed data {
 parameters {
     real worldspeed;
         
-    real<lower=0> rho_raw;
+    real rho_raw;
     real<lower=0> alpha;
     vector[N] eta;
 
@@ -62,8 +64,8 @@ parameters {
 }
 
 transformed parameters {
-    real rho = exp(rho_raw * 2 + 10);
-    vector[A] ameans = abilities * ability_std * 2;
+    real rho = exp(rho_raw + log(10));
+    vector[A] ameans = abilities * ability_std;
     vector[A] astds = inconsistencies * astd_std;
     vector[N] f;
     {
@@ -81,7 +83,7 @@ model {
     eta ~ normal(0, 1);
     alpha ~ normal(0, 1);
     
-    // effective prior for rho: lognormal(log(10), log(2))
+    // effective prior for rho: lognormal(log(10), 1)
     rho_raw ~ normal(0, 1);
 
     // effective prior: normal(10, 1)
@@ -89,6 +91,8 @@ model {
     
     ability_std ~ normal(0, 1);
     abilities ~ normal(0, 1);
+    
+    // effective prior: normal(0, astd_std)
     inconsistencies ~ normal(0, 1);
     
     for (n in 1:N) {
@@ -98,3 +102,32 @@ model {
 }"""
 
 sm = pystan.StanModel(model_code=modelcode)
+
+def init(N, A):
+    """Custom initialisation for GP records model.
+    
+    this custom initialisation tries to ensure that the inital values
+    for the average worldspeed tend to be above the world record times,
+    otherwise the initialisation should be very similar to the standard
+    random initialisation within [-2, 2]
+    """
+    return dict(
+            eta=np.random.rand(N) * 4 - 2,
+            alpha=np.random.rand() * 2,
+            rho_raw=np.random.rand() * 4 - 2,
+            worldspeed=np.random.rand() * 2,
+            ability_std=np.random.rand() * 2,
+            abilities=np.random.rand(A) * 4 - 2,
+            inconsistencies=np.random.rand(A) * 2)
+
+
+def wpi_quantiles(fit, years):
+    """Returns inferred quantiles of hidden world performance index."""
+    
+    samples = fit.extract(['f', 'worldspeed'])
+    
+    samples = pd.DataFrame(samples['worldspeed'][:, None] + samples['f'] + 10, 
+                           columns=years)
+
+    return samples.stack().groupby('Date').quantile(
+            [0.025, 0.5, 0.975]).unstack('Date').T
