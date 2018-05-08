@@ -52,7 +52,7 @@ transformed data {
 }
 
 parameters {
-    real worldspeed;
+    real average;
         
     real rho_raw;
     real<lower=0> alpha;
@@ -87,7 +87,7 @@ model {
     rho_raw ~ normal(0, 1);
 
     // effective prior: normal(10, 1)
-    worldspeed ~ normal(0, 1);
+    average ~ normal(0, 1);
     
     ability_std ~ normal(0, 1);
     abilities ~ normal(0, 1);
@@ -97,36 +97,43 @@ model {
     
     for (n in 1:N) {
         records[n] ~ GaussRecord(recordsa[n], athletes[n], 
-                                 f[n] + worldspeed + 10 + ameans, astds);
+                                 f[n] + average + 10 + ameans, astds);
     }
 }"""
 
 sm = pystan.StanModel(model_code=modelcode)
 
-def init(N, A):
+def init(N, A, maxT):
     """Custom initialisation for GP records model.
     
     this custom initialisation tries to ensure that the inital values
-    for the average worldspeed tend to be above the world record times,
+    for the average tend to be above the world record times,
     otherwise the initialisation should be very similar to the standard
     random initialisation within [-2, 2]
     """
+    average = np.random.rand() * 2 + maxT - 10
+    ability_std = .1 + np.random.rand() * 0.1
+    abilities = np.random.rand(A) * 4 - 2
+    
+#    ind = (abilities * ability_std + average + 10) < maxT
+#    abilities[ind] = np.abs(abilities[ind])
+    
     return dict(
             eta=np.random.rand(N) * 4 - 2,
             alpha=np.random.rand() * 2,
             rho_raw=np.random.rand() * 4 - 2,
-            worldspeed=np.random.rand() * 2,
-            ability_std=np.random.rand() * 2,
-            abilities=np.random.rand(A) * 4 - 2,
-            inconsistencies=np.random.rand(A) * 2)
+            average=average,
+            ability_std=ability_std,
+            abilities=abilities,
+            inconsistencies=np.random.rand(A) * 4 + 1)
 
 
 def wpi_quantiles(fit, years):
     """Returns inferred quantiles of hidden world performance index."""
     
-    samples = fit.extract(['f', 'worldspeed'])
+    samples = fit.extract(['f', 'average'])
     
-    samples = pd.DataFrame(samples['worldspeed'][:, None] + samples['f'] + 10, 
+    samples = pd.DataFrame(samples['average'][:, None] + samples['f'] + 10, 
                            columns=years)
 
     return samples.stack().groupby('Date').quantile(
