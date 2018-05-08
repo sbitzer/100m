@@ -37,23 +37,7 @@ Rs.plot.bar(ax=axes[1])
 
 
 #%% compile the Stan model
-code = """functions {
-    real GaussRecord_lpdf(real rec, int reca, vector ameans, vector astds){
-        int A = num_elements(ameans);
-        real lp = 0;
-
-        for (a in 1:A) {
-            if (a == reca)
-                lp += -log(astds[a]) - square(rec - ameans[a]) / square(astds[a]) / 2;
-            else
-                lp += log1m(Phi((rec - ameans[a]) / astds[a]));
-        }
-        
-        return lp;
-    }
-}
-
-data {
+code = """data {
     int<lower=1> A;
     int<lower=1> N;
     
@@ -80,7 +64,11 @@ model {
     inconsistencies ~ normal(0, 1);
     
     for (n in 1:N)
-        records[n] ~ GaussRecord(recordsa[n], ameans, astds);
+        for (a in 1:A)
+            if (recordsa[n] == a)
+                records[n] ~ normal(ameans[a], astds[a]);
+            else
+                target += normal_lccdf(records[n] | ameans[a], astds[a]);
 }"""
 
 sm = pystan.StanModel(model_code=code)
